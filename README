@@ -1,0 +1,109 @@
+
+# HAP-MLP Automation Platform (V2)
+
+本项目用于自动化构建 HONPAS 计算任务并生成机器学习势训练数据集。流程包含结构微扰生成、任务提交、结果提取清洗以及数据分布分析。
+
+## 1. 目录结构
+
+```text
+HAP_project_v2/
+├── config.py              # 全局配置文件（路径、计算参数、阈值设置）
+├── main.py                # 程序入口，处理命令行参数
+├── modules/               # 功能模块目录
+├── templates/             # HONPAS 输入文件模板 (.in) 及赝势文件
+└── data/                  # 数据存放目录
+    ├── raw/               # 原始结构 (POSCAR)
+    ├── perturbed/         # 微扰后的结构备份 (npy)
+    └── training/          # 最终提取并清洗的训练集
+```
+
+## 2. 模块说明 (`modules/`)
+
+所有核心逻辑位于 `modules` 文件夹下，各文件功能如下：
+
+### 流程控制
+*   **`workflows.py`**
+    *   封装了 Stage 1 (生成)、Stage 2 (收集)、Stage 3 (分析) 的具体执行逻辑。
+    *   负责调用其他底层模块，串联整个工作流。
+
+### 结构处理
+*   **`sampler.py`**
+    *   读取基态结构（POSCAR）。
+    *   调用 `dpdata` 进行扩胞、原子随机位移和晶胞形变，生成微扰结构列表。
+    *   调用 `validator.py` 对生成的结构进行筛选。
+*   **`validator.py`**
+    *   基于 ASE 库进行几何检查。
+    *   计算原子间距离，剔除原子间距过小（默认小于共价半径之和的一半）的结构，防止提交不合理的任务。
+
+### 任务管理
+*   **`wrapper.py`**
+    *   负责生成 HONPAS 的输入文件 (`INPUT.fdf`)。
+    *   读取模板文件（如 `honpas_scf.in`），将 Python 中的结构数据写入模板中的占位符区域。
+*   **`scheduler.py`**
+    *   创建任务文件夹（如 `workspace/task_0000`）。
+    *   将 `templates/psfs` 下的赝势文件复制到任务目录。
+    *   生成 Slurm 作业脚本 (`run.sh`) 并执行批量提交。
+
+### 数据后处理
+*   **`extractor.py`**
+    *   遍历计算目录，识别 `output.log`。
+    *   利用 `dpdata` 接口解析能量、力、应力和坐标信息，合并为数据集。
+*   **`cleaner.py`**
+    *   对提取后的数据进行质量控制。
+    *   **几何检查**：再次检查是否存在原子重叠。
+    *   **统计检查**：计算能量的 Z-score，剔除偏离平均值过大（离群值）的帧。
+    *   **受力检查**：剔除受力数值异常大（如计算发散）的帧。
+
+### 数据分析
+*   **`analyzer.py`**
+    *   读取最终的 `npy` 格式数据集。
+    *   计算 SOAP (Smooth Overlap of Atomic Positions) 描述符。
+    *   使用 PCA 进行降维，并结合能量数据绘制二维分布图，用于评估数据集的相空间覆盖情况。
+
+## 3. 使用方法
+
+通过 `main.py` 运行，支持通过参数切换计算模式和执行阶段。
+
+### 命令行参数
+*   `--mode`: 指定计算类型。
+    *   `scf`: 单点能计算。
+    *   `relax`: 结构优化。
+    *   `aimd`: 分子动力学。
+*   `--stage`: 指定执行阶段。
+    *   `1`: 生成输入文件并提交作业。
+    *   `2`: 收集计算结果并清洗。
+    *   `3`: 数据可视化分析。
+*   `--submit`: （可选）仅在 Stage 1 使用，加上此参数才会真实提交作业，否则仅生成文件。
+
+### 操作示例
+
+**1. 生成并提交结构优化任务**
+```bash
+# 生成文件并检查 (Dry Run)
+python main.py --mode relax --stage 1
+
+# 确认无误后提交
+python main.py --mode relax --stage 1 --submit
+```
+
+**2. 收集并清洗数据**
+（需等待任务计算完成）
+```bash
+python main.py --mode relax --stage 2
+```
+数据将保存至 `data/training/set_relax_时间戳/`。
+
+**3. 数据集分析**
+```bash
+python main.py --mode relax --stage 3
+```
+分析图表将保存至 `data/analysis/report_relax/`。
+
+## 4. 依赖库
+
+*   dpdata
+*   ase
+*   numpy
+*   dscribe (用于 SOAP 分析)
+*   scikit-learn (用于 PCA 降维)
+*   matplotlib / seaborn
