@@ -1,4 +1,3 @@
----
 
 # HAP-MLP-Platform
 
