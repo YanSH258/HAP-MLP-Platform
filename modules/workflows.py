@@ -11,6 +11,7 @@ from modules.scheduler import TaskScheduler
 from modules.extractor import ResultExtractor
 from modules.cleaner import DataQualityControl
 from modules.analyzer import SOAPSpaceAnalyzer
+from modules.merger import DatasetMerger
 
 # ==============================================================================
 # Stage 1: 生成与提交
@@ -108,30 +109,65 @@ def run_stage_2_collect(mode="scf"):
 # ==============================================================================
 # Stage 3: 可视化分析
 # ==============================================================================
-def run_stage_3_analysis(mode="scf"):
+def run_stage_3_analysis(mode="scf", custom_path=None):
     print(f"\n=== Stage 3: 可视化分析 (Mode: {mode.upper()}) ===")
     
-    # 1. 自动查找 data/training 下最新的数据集
-    search_pattern = f"data/training/set_{mode}_*"
-    found_dirs = sorted(glob.glob(search_pattern))
+    if custom_path:
+        # 如果手动指定了路径，直接使用它
+        data_path = custom_path
+    else:
+        # 否则，自动查找 data/training 下该 mode 最新的数据集
+        search_pattern = f"data/training/set_{mode}_*"
+        found_dirs = sorted(glob.glob(search_pattern))
+        if not found_dirs: 
+            print(f"❌ 错误: 未找到 mode={mode} 的数据集。请通过 --path 指定。")
+            return
+        data_path = found_dirs[-1]
     
-    if not found_dirs:
-        print(f"❌ 错误: 在 data/training/ 下未找到 mode={mode} 的数据集。")
-        print("   请先运行 Stage 2 (收集与清洗) 生成数据。")
-        return
-
-    # 取最新的一个文件夹
-    data_path = found_dirs[-1]
     print(f"[Workflow] 锁定数据集: {data_path}")
+
     
-    # 2. 准备输出目录
-    output_dir = os.path.join("data/analysis", f"report_{mode}")
+    # 2. 准备输出目录 (如果是合并数据，存入 report_merged)
+    if "merged" in data_path:
+        output_dir = os.path.join("data/analysis", "report_merged")
+    else:
+        output_dir = os.path.join("data/analysis", f"report_{mode}")
     
-    # 3. 调用分析器 (强制读取 npy 格式)
+    # 3. 调用分析器
     try:
         analyzer = SOAPSpaceAnalyzer(data_path, output_dir)
         analyzer.compute_and_plot(cfg.VIS_CONFIG, cfg.SPECIES_MAP)
     except Exception as e:
-        print(f"❌ 分析过程出错: {e}")
-        import traceback
-        traceback.print_exc()
+        print(f"❌ 分析出错: {e}")
+
+# ==============================================================================
+# Stage 4: 数据集大合并
+# ==============================================================================
+def run_stage_4_merge():
+    print(f"\n=== Stage 4: 数据集大合并 ===")
+    
+    # 1. 自动搜索 data/training/ 下所有的有效数据集目录
+    # 你也可以手动指定具体的目录列表
+    search_pattern = "data/training/set_*"
+    all_sets = sorted(glob.glob(search_pattern))
+    
+    if not all_sets:
+        print("❌ 未在 data/training/ 下找到任何待合并的数据集。")
+        return
+
+    print(f"[Workflow] 发现以下数据集:")
+    for s in all_sets:
+        print(f"   - {s}")
+    
+    confirm = input("\n是否确认合并以上所有数据集? (y/n): ")
+    if confirm.lower() != 'y':
+        print("操作取消。")
+        return
+
+    # 2. 执行合并
+    timestamp = time.strftime("%Y%m%d_%H%M%S")
+    output_dir = f"data/training/merged_master_{timestamp}"
+    
+    merger = DatasetMerger()
+    merger.merge_all(all_sets, output_dir)
+
