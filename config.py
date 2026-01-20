@@ -20,6 +20,9 @@ SPECIES_MAP = {
     1:  {'index': 4, 'label': 'H'}
 }
 
+# 超胞配置
+SUPERCELL_SIZE = [2, 1, 1] 
+
 # 微扰配置
 PERTURB_CONFIG = {
     "cell_pert_fraction": 0.03,
