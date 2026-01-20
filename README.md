@@ -95,13 +95,19 @@ python main.py --stage 4
 │   └── analysis/            # UMAP/PCA 分析报告
 ├── templates/               # 计算软件输入模板 (HONPAS/SIESTA等)
 └── modules/                 # 核心功能模块
-    ├── sampler.py           # 扩胞与扰动采样
-    ├── extractor.py         # 数据自动提取 (支持 SCF/AIMD)
-    ├── cleaner.py           # 基于物理/统计的数据清洗
-    ├── merger.py            # 数据集无损合并
-    └── analyzer.py          # SOAP+UMAP 高维可视化
 ```
-
+平台的核心逻辑分布在 modules/ 文件夹中，各模块职责如下：
+模块名称	核心职责
+sampler.py	结构处理中心：负责扩胞 (Supercell) 和几何微扰 (Perturbation)。
+validator.py	预筛选闸门：在提交计算前，拦截原子重叠等不合理的物理构型。
+wrapper.py	模板引擎：将结构数据填入计算软件（如 HONPAS）的输入模板中。
+scheduler.py	任务管家：管理 Slurm 任务生成、sbatch 提交及作业状态监控。
+extractor.py	数据采集：支持 SCF 与 AIMD 模式，自动解析 output 与轨迹文件。
+cleaner.py	质量控制 (QC)：基于共价半径检查碰撞，剔除能量与力的离群帧。
+analyzer.py	特征提取：计算 SOAP 描述符，并进行 PCA 或非线性降维。
+merger.py	数据聚合：无损合并不同 batch 或不同模式（SCF/AIMD）的数据集。
+visualizer.py	绘图工具：提供能量/力分布直方图及构型空间散点图。
+workflows.py	工作流编排：将上述模块串联成 Stage 1~4 的标准操作流程。
 ---
 
 ## 注意事项
