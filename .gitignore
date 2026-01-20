@@ -1,18 +1,23 @@
-# --- Python 缓存 ---
+# --- Python 基础 ---
 __pycache__/
 *.pyc
+*.pyo
+.ipynb_checkpoints/
 
-# --- 计算工作目录 (包含大量临时文件) ---
-workspace*/
-train_work_*/
-test_output*/
+# --- 忽略所有大型数据目录 ---
+data/analysis/
+data/perturbed/
+data/training/
+workspace_*/
 
-
-# --- 日志文件 ---
-*.log
+# --- 忽略特定后缀的大文件 ---
+*.npy
+*.raw
+*.png
 *.out
-slurm_logs/
-0_NORMAL_EXIT
+*.log
 
-# --- 系统文件 ---
-.DS_Store
+# --- 允许上传的部分 (白名单) ---
+# 即使上面忽略了 data/，我们也要保留原始结构和少量配置文件
+!data/raw/           # 保留原始结构文件 (HAP.cif, POSCAR等通常很小)
+!data/dp2xyz.py      # 保留数据转换脚本
