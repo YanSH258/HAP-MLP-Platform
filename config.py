@@ -21,7 +21,7 @@ SPECIES_MAP = {
 }
 
 # 超胞配置
-SUPERCELL_SIZE = [2, 1, 1] 
+SUPERCELL_SIZE = [2, 2, 2] 
 
 # 微扰配置
 PERTURB_CONFIG = {
