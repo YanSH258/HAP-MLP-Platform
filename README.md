@@ -1,79 +1,114 @@
+---
 
-# HONPAS-DeepMD 数据构建流程 
+# HAP-MLP-Platform
 
-本项目旨在实现 HONPAS 第一性原理计算到机器学习势函数训练集生成的自动化流程。目前已完成初始结构采样、任务调度、数据清洗及数据集分布分析模块的开发。
+**HAP-MLP-Platform** 是一个集成化的机器学习势函数（MLP）训练数据生产与管理平台。它基于 `dpdata` 和 `ASE`，支持从结构采样、输入生成、任务提交、结果清洗到特征分析的全流程自动化。
 
-## 1. 项目概述
+## 核心特性
 
-为了构建高精度的机器学习势能（MLP），本项目基于 Python 开发了一套自动化脚本，主要包含以下功能：
-*   **结构采样**：基于基态结构生成超胞构型、微扰构型，用于扩充训练集的相空间覆盖度。
-*   **接口适配**：自动生成 HONPAS 输入文件，支持单点能 (SCF)、结构优化 (Relax) 和分子动力学 (AIMD) 模式。
-*   **流程管理**：对接 Slurm 集群进行作业提交与监控。
-*   **数据清洗**：提取计算结果并进行物理合理性校验，剔除异常数据。
-*   **质量评估**：基于 SOAP 描述符对数据集进行可视化分析。
+*   **智能采样**：支持扩胞（Supercell）与微扰（Perturbation），内置基于原子共价半径的碰撞检测。
+*   **多模式支持**：支持单点能（SCF）批量采样与动力学（AIMD）轨迹提取。
+*   **高性能清洗**：自动剔除原子重叠、能量离群值及受力异常帧。
+*   **高维分析**：集成 SOAP 描述符与 UMAP/t-SNE 算法，可视化训练集的构型空间覆盖率。
+*   **数据集管理**：支持多源数据集（SCF + AIMD）的一键合并。
 
-## 2. 目录结构说明
+---
 
-```text
-HAP_project_v2/
-├── config.py              # 全局参数配置（微扰幅度、清洗阈值、路径设置）
-├── main.py                # 主程序入口，通过命令行控制各阶段执行
-├── modules/               # 功能模块
-│   ├── sampler.py         # 结构超胞构建微扰生成与预筛选
-│   ├── validator.py       # 几何检查模块（原子重叠检测）
-│   ├── wrapper.py         # HONPAS 输入文件生成 (.fdf)
-│   ├── scheduler.py       # 任务目录创建、赝势分发与 Slurm 提交
-│   ├── extractor.py       # 计算结果解析 (log -> dpdata)
-│   ├── cleaner.py         # 数据清洗 (能量/受力统计筛选)
-│   ├── analyzer.py        # 数据集分布分析 (SOAP + PCA)
-│   └── workflows.py       # 阶段流程逻辑封装
-├── templates/             # 计算模板与赝势库
-└── data/                  # 数据流转目录
-    ├── raw/               # 原始输入 (POSCAR)
-    ├── perturbed/         # 微扰结构备份
-    ├── training/          # 最终生成的 DeepMD 训练集 (npy格式)
-    └── analysis/          # 分析报告与图表
+## 运行环境
+
+建议使用 `conda` 创建环境：
+
+```bash
+conda create -n hap_mlp python=3.9
+conda activate hap_mlp
+pip install dpdata ase dscribe scikit-learn umap-learn matplotlib
 ```
 
-## 3. 已实现功能模块
+---
 
-### 3.1 初始采样 (Sampler & Validator)
-*   **微扰生成**：利用 `dpdata` 对晶胞随机原子微扰和晶格形变。
-*   **物理预筛选**：引入几何检查机制，在生成阶段自动剔除原子间距小于共价半径和 0.5 倍的结构，避免提交必定发散的计算任务。
+## 快速上手
 
-### 3.2 任务调度 (Scheduler)
-*   **模板适配**：支持通过 `config.py` 配置不同计算模式（SCF/Relax/AIMD）的输入模板。
-*   **自动部署**：自动创建任务文件夹，写入输入文件并复制对应的赝势文件（`.psf`）。
-*   **集群对接**：自动生成 Slurm 作业脚本并支持批量提交。
+项目通过 `main.py` 进行阶段化管理，主要分为四个阶段（Stage）。
 
-### 3.3 数据后处理 (Extractor & Cleaner)
-*   **结果提取**：解析 HONPAS 输出日志，提取能量、力、维里（Virial）和坐标信息。
-*   **质量控制 (QC)**：
-    *   **几何校验**：二次检查计算后的结构是否存在原子重叠。
-    *   **统计筛选**：计算能量分布的 Z-score，自动剔除偏离平均值超过阈值（如 $4\sigma$）的离群帧。
-    *   **受力筛选**：剔除受力异常大（如 $> 30 \text{ eV/\AA}$）的发散帧。
+### 0. 配置参数
+在运行前，修改项目根目录下的 `config.py`：
+*   `INPUT_PATH`: 初始结构文件（如 POSCAR）。
+*   `SUPERCELL_SIZE`: 扩胞尺寸，如 `[2, 2, 2]`。
+*   `NUM_TASKS`: 扰动生成的任务数量。
+*   `QC_OVERLAP_THRESHOLD`: 原子重叠阈值（共价半径之和的倍数，建议 0.5）。
 
-### 3.4 数据分析 (Analyzer)
-*   **相空间可视化**：计算结构的全局 SOAP 描述符，利用 PCA 降维并结合相对能量进行可视化。
-*   **用途**：用于评估生成的微扰结构或 MD 轨迹是否具有足够的多样性，以及是否存在非物理的结构断层。
+### Stage 1: 任务生成与提交
+生成微扰结构并提交至超算集群（支持 Slurm）。
 
-## 4. 当前工作流
+```bash
+# 生成 SCF 采样任务 (默认 DryRun，仅生成文件不提交)
+python main.py --stage 1 --mode scf
 
-通过 `main.py` 分三个阶段执行：
+# 生成任务并直接提交到 Slurm 队列
+python main.py --stage 1 --mode scf --submit
 
-*   **Stage 1: 生成与提交**
-    *   读取 `POSCAR` -> 生成微扰结构 -> 预筛选 -> 生成任务目录 -> 提交 Slurm 作业。
-*   **Stage 2: 收集与清洗**
-    *   遍历任务目录 -> 提取 `output.log` -> 执行 QC 清洗 -> 导出为 DeepMD (`.npy`) 格式。
-*   **Stage 3: 分析与评估**
-    *   读取清洗后的数据集 -> 计算 SOAP-PCA -> 生成分布图。
+# 同样支持 aimd 模式的初始结构准备
+python main.py --stage 1 --mode aimd --submit
+```
 
-## 5. 依赖环境
+### Stage 2: 数据收集与清洗
+计算完成后，提取 `output.log` 等结果，进行质量控制并转换为 DeepMD 格式。
 
-*   Python 3.x
-*   dpdata
-*   ase
-*   numpy
-*   dscribe (用于 SOAP 计算)
-*   scikit-learn (用于 PCA 降维)
-*   matplotlib / seaborn
+```bash
+# 收集 SCF 单点能数据 (提取每一文件夹的最后一帧)
+python main.py --stage 2 --mode scf
+
+# 收集 AIMD 轨迹数据 (从 .ANI/.FA 文件提取完整轨迹)
+python main.py --stage 2 --mode aimd
+```
+清洗后的数据将存放在 `data/training/set_{mode}_{timestamp}`。
+
+### Stage 3: 构型空间可视化分析
+利用 SOAP 描述符和 UMAP 算法分析数据集的构型覆盖范围。
+
+```bash
+# 分析最新的 SCF 数据集
+python main.py --stage 3 --mode scf
+
+# 分析指定的任意数据集路径
+python main.py --stage 3 --path data/training/merged_master_20260120
+```
+图表保存于 `data/analysis/` 目录下。
+
+### Stage 4: 数据集大合并
+将多个 batch 的数据（如不同温度的 AIMD 和不同幅度的 SCF）合并为一个最终训练集。
+
+```bash
+# 自动搜索 data/training/ 下所有 set_* 文件夹并合并
+python main.py --stage 4
+```
+
+---
+
+## 目录结构说明
+
+```text
+├── config.py                # 核心配置文件
+├── main.py                  # 工作流入口
+├── data/
+│   ├── raw/                 # 原始结构输入
+│   ├── training/            # 清洗后的 DeepMD 训练集
+│   └── analysis/            # UMAP/PCA 分析报告
+├── templates/               # 计算软件输入模板 (HONPAS/SIESTA等)
+└── modules/                 # 核心功能模块
+    ├── sampler.py           # 扩胞与扰动采样
+    ├── extractor.py         # 数据自动提取 (支持 SCF/AIMD)
+    ├── cleaner.py           # 基于物理/统计的数据清洗
+    ├── merger.py            # 数据集无损合并
+    └── analyzer.py          # SOAP+UMAP 高维可视化
+```
+
+---
+
+## 注意事项
+
+1.  **扩胞逻辑**：在 Stage 1 执行时，程序会检查 `SUPERCELL_SIZE`。若任意维度 > 1，则会自动执行扩胞后再进行扰动。
+2.  **AIMD 提取**：使用 `--mode aimd` 时，请确保任务目录下存在轨迹文件（如 `.ANI` 或 `.FA`），否则将无法提取受力信息。
+3.  **原子类型顺序**：合并数据集时，`dpdata` 会严格检查原子种类顺序。请确保所有 batch 使用相同的 `SPECIES_MAP` 配置。
+
+---
