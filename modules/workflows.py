@@ -26,6 +26,19 @@ def run_stage_1_generate(mode="scf", dry_run=True):
     # 2. 采样 (Sampler 内部已集成 Validator 预筛选)
     print(f"[Workflow] 读取结构: {cfg.INPUT_PATH}")
     sampler = StructureSampler(cfg.INPUT_PATH)
+
+    # --- 优化点：智能处理扩胞逻辑 ---
+    target_size = cfg.SUPERCELL_SIZE
+    
+    # 检查是否真的需要扩胞 (只要有一个维度 > 1)
+    if any(s > 1 for s in target_size):
+        print(f"[Workflow] 检测到扩胞配置 {target_size}，正在执行扩胞...")
+        sampler.apply_supercell(target_size)
+    else:
+        print(f"[Workflow] 扩胞配置为 {target_size}，保持输入结构不变。")
+        print(f"           当前原子数: {sampler.current_system.get_natoms()}")
+
+    # 执行微扰
     systems = sampler.generate_perturbations(
         num_perturbed=cfg.NUM_TASKS, 
         pert_config=cfg.PERTURB_CONFIG
