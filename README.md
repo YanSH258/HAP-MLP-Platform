@@ -104,11 +104,24 @@ python main.py --stage 4
 | **workflows.py** | **工作流编排**：将各独立模块按业务逻辑串联，定义 Stage 1~4 的标准化操作。 |
 ```
 
----
-### 注意事项
+### ⚠️ 注意事项 (Notes)
 
-1.  **扩胞逻辑**：在 Stage 1 执行时，程序会检查 `SUPERCELL_SIZE`。若任意维度 > 1，则会自动执行扩胞后再进行扰动。
-2.  **AIMD 提取**：使用 `--mode aimd` 时，请确保任务目录下存在轨迹文件（如 `.ANI` 或 `.FA`），否则将无法提取受力信息。
-3.  **原子类型顺序**：合并数据集时，`dpdata` 会严格检查原子种类顺序。请确保所有 batch 使用相同的 `SPECIES_MAP` 配置。
+1. **扩胞与计算量**：
+   - 在 Stage 1 执行时，程序会检测 `config.py` 中的 `SUPERCELL_SIZE`。
+   - **注意**：扩胞会成倍增加原子数，请根据 **HONPAS** 的计算效率和内存限制合理设置。建议先用小体系测试单步 SCF 耗时。
 
----
+2. **AIMD 数据提取的前提条件**：
+   - 使用 `--mode aimd` 提取数据时，`extractor` 依赖 `dpdata` 的 `siesta/aimd_output` 格式。
+   - **必须确保**：每个任务目录下除了 `output.log`，还必须包含同名的 **`.ANI`** (坐标轨迹) 和 **`.FA`** (受力轨迹) 文件，否则 `dpdata` 将无法解析出任何有效帧。
+
+3. **原子类型顺序 (Atom Species Consistency)**：
+   - 在执行 Stage 4 合并不同来源的数据集（如 SCF 与 AIMD 合并）时，`dpdata` 会严格校验原子类型的顺序。
+   - **操作建议**：请确保所有计算模式下 `config.py` 中的 `SPECIES_MAP` 定义完全一致。如果原子顺序错乱，合并过程将会报错或导致训练出的势函数物理意义错误。
+
+4. **物理合理性预筛选**：
+   - Stage 1 在生成微扰结构时会调用 `validator` 模块。如果设置的微扰幅度（`atom_pert_distance`）过大，可能导致大量结构因原子重叠被拦截。
+   - 如果发现生成的任务数少于预期，请适当减小微扰参数或调整 `QC_OVERLAP_THRESHOLD` 阈值。
+
+5. **可视化环境依赖**：
+   - Stage 3 的 UMAP 分析依赖 `umap-learn` 库。如果运行报错，请确保已执行 `pip install umap-learn`。
+   - 对于超过 2000 帧的大规模数据集，UMAP 的计算可能需要几分钟时间，请耐心等待。
