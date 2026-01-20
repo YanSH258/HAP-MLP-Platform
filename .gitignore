@@ -7,14 +7,6 @@ workspace*/
 train_work_*/
 test_output*/
 
-# --- 数据目录 (只保留 raw 里的示例，忽略生成的大文件) ---
-# 忽略 data 下的所有内容
-data/*
-# 但是不忽略 data/raw (保留输入示例)
-!data/raw/
-# 再次忽略 data/raw 下可能存在的非文本大文件 (可选)
-data/raw/*.chk
-data/raw/*.wfs
 
 # --- 日志文件 ---
 *.log

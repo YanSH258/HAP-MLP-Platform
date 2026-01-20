@@ -1,0 +1,8 @@
+Frame 6: Max force 104.02 > 100
+Frame 14: Max force 172.25 > 100
+Frame 17: Max force 103.95 > 100
+Frame 54: Max force 118.46 > 100
+Frame 102: Max force 106.04 > 100
+Frame 120: Max force 130.88 > 100
+Frame 142: Max force 162.34 > 100
+Frame 177: Max force 127.64 > 100

@@ -1,0 +1,7 @@
+Frame 1000: Energy outlier (Z-score > 4.0)
+Frame 1001: Energy outlier (Z-score > 4.0)
+Frame 1002: Energy outlier (Z-score > 4.0)
+Frame 1003: Energy outlier (Z-score > 4.0)
+Frame 1004: Energy outlier (Z-score > 4.0)
+Frame 1014: Energy outlier (Z-score > 4.0)
+Frame 1015: Energy outlier (Z-score > 4.0)
