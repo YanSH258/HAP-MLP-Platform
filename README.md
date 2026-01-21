@@ -157,14 +157,14 @@ python main.py --stage 7 --model_type deepmd
 
 平台的业务逻辑按功能域进行了划分：
 
-### 🧬 生成端 (`modules/generation`)
+###  生成端 (`modules/generation`)
 | 模块 | 职责 |
 | :--- | :--- |
 | **sampler.py** | **结构生成器**：基于 `dpdata` 实现基态结构的超胞扩充与随机微扰。 |
 | **wrapper.py** | **模板引擎**：将结构数据注入 HONPAS 模板，自动映射元素。 |
 | **scheduler.py** | **任务调度**：管理任务目录、分发赝势、生成 `run.sh` 并提交作业。 |
 
-### 💾 数据端 (`modules/data`)
+###  数据端 (`modules/data`)
 | 模块 | 职责 |
 | :--- | :--- |
 | **extractor.py** | **结果采集**：解析 `output.log` 提取能量、力、维里及坐标。 |
@@ -173,20 +173,20 @@ python main.py --stage 7 --model_type deepmd
 | **converter.py** | **格式转换**：实现 DeepMD/GPUMD 格式互转，修正维里符号。 |
 | **merger.py** | **数据聚合**：支持将多个分散的数据集无损合并。 |
 
-### 📊 分析端 (`modules/analysis`)
+###  分析端 (`modules/analysis`)
 | 模块 | 职责 |
 | :--- | :--- |
 | **analyzer.py** | **特征分析**：计算 SOAP 描述符并执行 PCA 降维。 |
 | **visualizer.py** | **绘图组件**：提供基础统计图表支持。 |
 
-### 🚀 训练端 (`modules/training`)
+###  训练端 (`modules/training`)
 | 模块 | 职责 |
 | :--- | :--- |
 | **trainer.py** | **训练准备**：数据拆分、生成配置文件 (`input.json`/`nep.in`)。 |
 | **monitor.py** | **训练监控**：解析日志并绘制 Loss 曲线。 |
 | **evaluator.py** | **模型评估**：模型冻结压缩、测试推理及 Parity Plot 绘制。 |
 
-### 🔗 核心控制
+###  核心控制
 | 模块 | 职责 |
 | :--- | :--- |
 | **workflows.py** | **流程编排**：串联各子模块，定义 Stage 1~7 的标准化逻辑。 |
