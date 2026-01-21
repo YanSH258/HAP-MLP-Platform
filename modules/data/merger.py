@@ -1,59 +1,80 @@
 import os
 import glob
 import dpdata
-import time
+import shutil
 from modules.data.converter import NEPConverter
 
 class DatasetMerger:
-    @staticmethod
-    def merge_all(dataset_dirs, output_path):
+    def merge_all(self, dataset_dirs, output_root):
         """
-        dataset_dirs: 一个包含多个数据集路径的列表
-        output_path: 合并后的保存路径
+        dataset_dirs: 待合并的源目录列表
+        output_root: 输出的根目录 (例如 data/training/merged_master_xxx)
         """
         if not dataset_dirs:
             print("❌ 没有提供需要合并的路径。")
-            return None
+            return
 
-        print(f"[Merger] 准备合并 {len(dataset_dirs)} 个数据集...")
+        print(f"[Merger] 准备处理 {len(dataset_dirs)} 个数据集...")
         
-        # 1. 加载第一个作为基准
-        try:
-            # 假设之前保存的都是 deepmd/npy 格式
-            final_system = dpdata.LabeledSystem(dataset_dirs[0], fmt='deepmd/npy')
-            print(f"   -> [1/{len(dataset_dirs)}] 加载: {dataset_dirs[0]} ({len(final_system)} 帧)")
-        except Exception as e:
-            print(f"❌ 加载基础数据集失败: {e}")
-            return None
+        # 1. 准备输出目录和总XYZ文件
+        if not os.path.exists(output_root):
+            os.makedirs(output_root)
+        
+        global_xyz_path = os.path.join(output_root, "train.xyz")
+        # 清空/新建 train.xyz
+        open(global_xyz_path, 'w').close()
 
-        # 2. 循环追加剩下的
-        for i, ddir in enumerate(dataset_dirs[1:], 2):
+        # 2. 按化学式分组读取
+        # grouped_data = { "Ca44...": [System1, System2], "Ca352...": [System3] }
+        grouped_data = {}
+
+        for ddir in dataset_dirs:
             try:
-                next_sys = dpdata.LabeledSystem(ddir, fmt='deepmd/npy')
-                final_system.append(next_sys)
-                print(f"   -> [{i}/{len(dataset_dirs)}] 合并: {ddir} ({len(next_sys)} 帧)")
+                # 读取数据
+                sys = dpdata.LabeledSystem(ddir, fmt='deepmd/npy')
+                
+                # 获取化学式作为Key
+                atom_names = sys['atom_names']
+                atom_numbs = sys['atom_numbs']
+                formula = "".join([f"{n}{c}" for n, c in zip(atom_names, atom_numbs)])
+                
+                if formula not in grouped_data:
+                    grouped_data[formula] = []
+                grouped_data[formula].append(sys)
+                
             except Exception as e:
-                print(f"⚠️ 跳过数据集 {ddir}，原因: {e}")
+                print(f"⚠️ 无法读取 {ddir}, 跳过。原因: {e}")
 
-        # 3. 保存结果
-        if not os.path.exists(output_path):
-            os.makedirs(output_path)
+        # 3. 遍历分组进行合并与保存
+        print(f"[Merger] 识别到 {len(grouped_data)} 种不同的体系结构，开始分别合并...")
+
+        for formula, sys_list in grouped_data.items():
+            # --- 合并同类项 ---
+            merged_sys = sys_list[0]
+            for s in sys_list[1:]:
+                merged_sys.append(s)
             
-        print(f"[Merger] 正在写入硬盘: {output_path}")
+            n_frames = len(merged_sys)
+            n_atoms = sum(merged_sys['atom_numbs'])
+            print(f"  >> 处理分组 {formula} (N={n_atoms}): 共 {n_frames} 帧")
 
-        # (A) 保存 DeepMD 格式
-        final_system.to('deepmd/npy', output_path)
-        final_system.to('deepmd/raw', output_path)
-        print(f"   -> DeepMD (npy/raw) 已保存")
-        
-        # (B) 保存 GPUMD 格式 (train.xyz) -> 新增功能
-        xyz_out = os.path.join(output_path, "train.xyz")
-        try:
-            # 调用转换器，它会自动处理维里符号修正
-            NEPConverter.save_as_xyz(final_system, xyz_out)
-            print(f"   -> GPUMD (train.xyz) 已保存")
-        except Exception as e:
-            print(f"⚠️ 生成 train.xyz 失败: {e}")
-        
-        print(f"✅ 合并全流程完成！总帧数: {len(final_system)}")
-        return final_system
+            # --- (A) 保存 DeepMD 格式 (存入子文件夹) ---
+            # 目录名: merged_master_xxx/Ca10P6...
+            sub_dir = os.path.join(output_root, formula)
+            if not os.path.exists(sub_dir):
+                os.makedirs(sub_dir)
+            
+            merged_sys.to('deepmd/npy', sub_dir)
+            # merged_sys.to('deepmd/raw', sub_dir) # 可选，省空间可不存
+            print(f"     ✅ DeepMD数据保存至: {sub_dir}")
+
+            # --- (B) 追加到总 GPUMD train.xyz ---
+            try:
+                NEPConverter.save_as_xyz(merged_sys, global_xyz_path, mode='a')
+                print(f"     ✅ 追加到总 train.xyz")
+            except Exception as e:
+                print(f"     ⚠️ XYZ 转换失败: {e}")
+
+        print(f"✅ Stage 4 全部完成！")
+        print(f"   - DeepMD: 子文件夹 ({list(grouped_data.keys())})")
+        print(f"   - GPUMD:  {global_xyz_path}")
