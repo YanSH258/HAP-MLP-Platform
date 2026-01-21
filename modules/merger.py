@@ -2,6 +2,8 @@ import os
 import glob
 import dpdata
 import time
+# 关键：导入之前写好的转换器
+from modules.converter import NEPConverter
 
 class DatasetMerger:
     @staticmethod
@@ -34,13 +36,25 @@ class DatasetMerger:
             except Exception as e:
                 print(f"⚠️ 跳过数据集 {ddir}，原因: {e}")
 
-        # 3. 保存
+        # 3. 保存结果
         if not os.path.exists(output_path):
             os.makedirs(output_path)
             
+        print(f"[Merger] 正在写入硬盘: {output_path}")
+
+        # (A) 保存 DeepMD 格式
         final_system.to('deepmd/npy', output_path)
-        final_system.to('deepmd/raw', output_path) # 同时存一份 raw 方便查看
+        final_system.to('deepmd/raw', output_path)
+        print(f"   -> DeepMD (npy/raw) 已保存")
         
-        print(f"✅ 合并完成！总帧数: {len(final_system)}")
-        print(f"✅ 合并后的数据集已保存至: {output_path}")
+        # (B) 保存 GPUMD 格式 (train.xyz) -> 新增功能
+        xyz_out = os.path.join(output_path, "train.xyz")
+        try:
+            # 调用转换器，它会自动处理维里符号修正
+            NEPConverter.save_as_xyz(final_system, xyz_out)
+            print(f"   -> GPUMD (train.xyz) 已保存")
+        except Exception as e:
+            print(f"⚠️ 生成 train.xyz 失败: {e}")
+        
+        print(f"✅ 合并全流程完成！总帧数: {len(final_system)}")
         return final_system
