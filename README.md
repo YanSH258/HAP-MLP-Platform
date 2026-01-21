@@ -146,30 +146,26 @@ python main.py --stage 5 --model_type gpumd --data_path data/training/merged_mas
 
 ---
 
-## 6. 特殊说明
-1.  **维里符号修正**：HONPAS 输出的 Virial 与 GPUMD 定义符号相反。本平台在导出 `train.xyz` 时已自动乘以 `-1.0` 进行修正，DeepMD 格式保持原样。
-2.  **数据安全**：Stage 1 生成的微扰结构会备份在 `data/perturbed/`，即使 DFT 计算失败，几何结构依然保留。
 
-### ⚙️ 模块功能详解
+### 6. 模块功能详解
 
 平台的业务逻辑高度模块化，各组件职责如下表所示：
 
 | 模块名称 | 核心职责说明 |
 | :--- | :--- |
-| **sampler.py** | **结构处理中心**：负责原子结构的扩胞 (Supercell) 和几何微扰 (Perturbation)。 |
-| **validator.py** | **物理预筛选**：在提交计算前拦截原子重叠构型，减少无效计算成本。 |
-| **wrapper.py** | **HONPAS 模板引擎**：将采样结构自动填充至模板并关联相应的 PSF 赝势文件。 |
-| **scheduler.py** | **任务调度管家**：管理 Slurm 脚本生成、`sbatch` 提交及 HONPAS 作业状态监控。 |
-| **extractor.py** | **结果自动采集**：支持 SCF 与 AIMD 模式，解析 `output.log` 及轨迹文件提取能量/力。 |
-| **cleaner.py** | **质量控制 (QC)**：基于共价半径检查原子碰撞，自动剔除能量与力的统计离群帧。 |
-| **analyzer.py** | **特征分析**：利用 SOAP + UMAP/t-SNE 算法评估数据集对势能面的覆盖程度。 |
-| **merger.py** | **数据集聚合**：支持将不同采样模式下的 HONPAS 计算结果无损合并为统一训练集。 |
-| **visualizer.py** | **绘图组件**：提供能量/力分布直方图、降维空间散点图等可视化支持。 |
-| **workflows.py** | **工作流编排**：将各独立模块按业务逻辑串联，定义 Stage 1~4 的标准化操作。 |
+| **sampler.py** | **结构生成器**：基于 `dpdata` 实现基态结构的超胞扩充与随机微扰 。 |
+| **validator.py** | **物理预筛选**：基于共价半径检测原子重叠，在提交计算前拦截不合理的构型，节省算力。 |
+| **wrapper.py** | **模板引擎**：将结构数据注入 HONPAS 模板 (.fdf)，自动映射元素并关联对应的 PSF 赝势文件。 |
+| **scheduler.py** | **任务调度**：自动化管理任务目录、分发赝势、生成 Slurm 脚本 (`run.sh`) 并批量提交作业。 |
+| **extractor.py** | **结果采集**：支持 SCF/Relax/AIMD 模式，解析 `output.log` 提取能量、力、维里及坐标信息。 |
+| **cleaner.py** | **质量控制 (QC)**：执行后处理清洗，利用 Z-score 和最大受力阈值自动剔除离群数据 (Outliers)。 |
+| **converter.py** | **格式转换**：实现 DeepMD (`.npy`) 与 GPUMD (`.xyz`) 格式互转，自动修正 HONPAS 维里符号差异。 |
+| **merger.py** | **数据聚合**：支持将多个分散的数据集（如不同温度/批次）无损合并为统一的主数据集。 |
+| **analyzer.py** | **特征分析**：计算全局 SOAP 描述符并执行 PCA 降维，可视化评估数据集对势能面的覆盖度。 |
+| **trainer.py** | **训练准备**：自动划分训练集/验证集，生成 DeepMD (`input.json`) 或 GPUMD (`nep.in`) 配置文件。 |
+| **workflows.py** | **流程编排**：作为顶层逻辑控制器，串联各独立模块，定义 Stage 1~5 的标准化操作流程。 |
 
----
-
-### ⚠️ 注意事项 (Notes)
+### 7. 注意事项 (Notes)
 
 1. **扩胞与计算量控制**：
    - 在 Stage 1 执行时，程序会检测 `config.py` 中的 `SUPERCELL_SIZE`。
@@ -189,3 +185,5 @@ python main.py --stage 5 --model_type gpumd --data_path data/training/merged_mas
 
 5. **物理预筛选拦截**：
    - 若生成的任务数少于 `NUM_TASKS` 设置值，通常是因为 `validator` 拦截了过多原子重叠构型。请尝试减小微扰幅度或微调 `QC_OVERLAP_THRESHOLD`。
+6.   **维里符号修正**：
+   - HONPAS 输出的 Virial 与 GPUMD 定义符号相反。本平台在导出 `train.xyz` 时已自动乘以 `-1.0` 进行修正，DeepMD 格式保持原样。
