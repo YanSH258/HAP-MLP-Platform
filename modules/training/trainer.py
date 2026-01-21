@@ -7,7 +7,6 @@ import numpy as np
 import dpdata
 import config as cfg
 import config_train as cfg_tr
-from modules.data.converter import NEPConverter
 
 class ModelTrainer:
     def __init__(self, work_dir):
@@ -20,76 +19,110 @@ class ModelTrainer:
         sorted_species = sorted(cfg.SPECIES_MAP.items(), key=lambda x: x[0])
         return [item[1]['label'] for item in sorted_species]
 
-    def _scan_and_split_data(self, source_path=None, val_ratio=0.2):
-        """扫描数据路径"""
-        valid_dirs = []
-
-        if source_path:
-            if not os.path.exists(source_path):
-                raise FileNotFoundError(f"指定的数据路径不存在: {source_path}")
-            
-            if os.path.exists(os.path.join(source_path, "type.raw")):
-                valid_dirs = [os.path.abspath(source_path)]
-            else:
-                sub_dirs = sorted(glob.glob(os.path.join(source_path, "*")))
-                valid_dirs = [os.path.abspath(d) for d in sub_dirs if os.path.isdir(d) and os.path.exists(os.path.join(d, "type.raw"))]
+    def _locate_source_xyz(self, source_path):
+        """定位源 train.xyz 文件"""
+        if source_path and os.path.exists(os.path.join(source_path, "train.xyz")):
+            target_xyz = os.path.join(source_path, "train.xyz")
+            print(f"[Trainer] 锁定源数据文件: {target_xyz}")
+            return target_xyz
         else:
-            search_path = os.path.join("data", "training", "set_*")
-            all_dirs = sorted(glob.glob(search_path))
-            valid_dirs = [os.path.abspath(d) for d in all_dirs if os.path.isdir(d)]
+            print("❌ 错误: 未找到 train.xyz。请先运行 Stage 4 (Merge) 生成合并数据。")
+            if source_path: print(f"   当前路径: {source_path}")
+            raise FileNotFoundError("Source train.xyz not found")
 
-        if not valid_dirs:
-            raise FileNotFoundError("未找到有效的数据集目录。")
-
-        # 如果只有一个数据集，直接返回，后续逻辑处理拆分
-        if len(valid_dirs) == 1:
-            return valid_dirs, valid_dirs
-
-        # 如果有多个数据集，按目录随机划分
+    def _split_xyz_file(self, source_xyz, val_ratio, out_train_name, out_val_name):
+        """
+        核心逻辑：读取大 XYZ，随机打乱，物理写入两个新文件
+        """
+        print(f"[Trainer] 正在读取并拆分数据 (Ratio={val_ratio})...")
+        
+        with open(source_xyz, 'r') as f:
+            lines = f.readlines()
+        
+        frames = []
+        i = 0
+        while i < len(lines):
+            try:
+                line = lines[i].strip()
+                if not line: # 跳过空行
+                    i += 1
+                    continue
+                natoms = int(line)
+                chunk_size = natoms + 2
+                frames.append(lines[i : i+chunk_size])
+                i += chunk_size
+            except ValueError:
+                i += 1
+                continue
+        
+        total_frames = len(frames)
+        print(f"   -> 识别到总帧数: {total_frames}")
+        
+        # 随机打乱
         random.seed(42)
-        random.shuffle(valid_dirs)
-        n_val = int(len(valid_dirs) * val_ratio)
-        if n_val == 0 and len(valid_dirs) > 1: n_val = 1
+        random.shuffle(frames)
         
-        val_sets = valid_dirs[:n_val]
-        train_sets = valid_dirs[n_val:]
+        n_val = int(total_frames * val_ratio)
+        val_frames = frames[:n_val]
+        train_frames = frames[n_val:]
         
-        print(f"[Trainer] 目录级划分: 训练集 {len(train_sets)} 个, 验证集 {len(val_sets)} 个")
-        return train_sets, val_sets
+        # 路径
+        path_train = os.path.join(self.work_dir, out_train_name)
+        path_val = os.path.join(self.work_dir, out_val_name)
+
+        # 写入训练集
+        with open(path_train, 'w') as f:
+            for frame in train_frames:
+                f.writelines(frame)
+        
+        # 写入验证/测试集
+        with open(path_val, 'w') as f:
+            for frame in val_frames:
+                f.writelines(frame)
+                
+        print(f"   -> 拆分完成:")
+        print(f"      Train: {len(train_frames)} 帧 -> {out_train_name}")
+        print(f"      Val/Test: {len(val_frames)} 帧 -> {out_val_name}")
+        
+        return path_train, path_val
 
     # ========================== DeepMD 流程 ==========================
     def prepare_deepmd(self, source_path=None, val_ratio=0.2):
-        print(f"[Trainer] 正在生成 DeepMD 配置文件...")
+        print(f"\n[Trainer] >>> 正在生成 DeepMD 配置文件 <<<")
         
-        raw_train_paths, raw_val_paths = self._scan_and_split_data(source_path, val_ratio)
+        # 1. 定位源数据
+        source_xyz = self._locate_source_xyz(source_path)
+
+        # 2. 物理拆分 XYZ (保留 train.xyz 和 valid.xyz 在工作目录)
+        xyz_train, xyz_val = self._split_xyz_file(source_xyz, val_ratio, "train.xyz", "valid.xyz")
+
+        # 3. 将拆分后的 XYZ 转为 DeepMD npy 格式
+        print(f"[Trainer] 正在将 XYZ 转换为 DeepMD npy 格式...")
         
-        # 判断是否为单一数据源
-        is_single_source = (len(raw_train_paths) == 1 and raw_train_paths == raw_val_paths)
+        dir_train_root = os.path.join(self.work_dir, "data_train")
+        dir_val_root = os.path.join(self.work_dir, "data_val")
+        
+        self._xyz_to_deepmd_folder(xyz_train, dir_train_root)
+        self._xyz_to_deepmd_folder(xyz_val, dir_val_root)
 
-        final_train_paths = []
-        final_val_paths = []
+        # 4. 获取所有生成的子系统路径 (递归查找 type.raw)
+        # 这里的路径是绝对路径
+        abs_train_systems = self._get_leaf_systems(dir_train_root)
+        abs_val_systems = self._get_leaf_systems(dir_val_root)
+        
+        # 转为相对路径 (./data_train/system_0 ...) 写入 json，方便迁移
+        rel_train_systems = [f"./{os.path.relpath(p, self.work_dir)}" for p in abs_train_systems]
+        rel_val_systems = [f"./{os.path.relpath(p, self.work_dir)}" for p in abs_val_systems]
 
-        if is_single_source:
-            print(f"[Trainer] 检测到单一合并数据集，正在执行【物理拆分】并保存至工作目录...")
-            # 执行拆分，并获取相对路径 (例如 ["./data_train"], ["./data_val"])
-            rel_train, rel_val = self._split_and_save_deepmd(raw_train_paths[0], val_ratio)
-            final_train_paths = rel_train
-            final_val_paths = rel_val
-        else:
-            print(f"[Trainer] 使用多个散乱数据集，使用绝对路径链接...")
-            final_train_paths = raw_train_paths
-            final_val_paths = raw_val_paths
-
-        # 写入配置
+        # 5. 生成配置 input.json
         jdata = cfg_tr.DEEPMD_TEMPLATE.copy()
         jdata["model"]["type_map"] = self._get_type_map()
         
-        # 注意：systems 必须是列表
         jdata["training"]["training_data"] = {
-            "systems": final_train_paths, "batch_size": "auto"
+            "systems": rel_train_systems, "batch_size": "auto"
         }
         jdata["training"]["validation_data"] = {
-            "systems": final_val_paths, "batch_size": "auto", "numb_btch": 1
+            "systems": rel_val_systems, "batch_size": "auto", "numb_btch": 1
         }
 
         json_path = os.path.join(self.work_dir, "input.json")
@@ -97,76 +130,42 @@ class ModelTrainer:
             json.dump(jdata, f, indent=4)
             
         print(f"✅ DeepMD 配置已生成: {json_path}")
-        if is_single_source:
-            print(f"   数据已物理拆分至: {self.work_dir}/data_train 和 data_val")
+        print(f"   - 训练集文件夹: data_train/ (含 {len(rel_train_systems)} 个子系统)")
+        print(f"   - 验证集文件夹: data_val/ (含 {len(rel_val_systems)} 个子系统)")
 
-    def _split_and_save_deepmd(self, dataset_path, val_ratio):
-        """
-        读取单一数据集，打乱拆分，保存到工作目录下的 data_train 和 data_val
-        返回相对路径列表
-        """
+    def _xyz_to_deepmd_folder(self, xyz_file, output_folder):
+        """利用 dpdata 读取 XYZ 并保存为 DeepMD npy 目录结构"""
         try:
-            # 1. 加载
-            print(f"  -> 加载原始数据: {dataset_path}")
-            system = dpdata.LabeledSystem(dataset_path, fmt="deepmd/npy")
-            n_frames = len(system)
+            type_map = self._get_type_map()
+            # 使用 quip/gap/xyz 读取 Extended XYZ
+            ms = dpdata.MultiSystems.from_file(xyz_file, fmt='quip/gap/xyz', type_map=type_map)
             
-            # 2. 打乱索引
-            indices = np.arange(n_frames)
-            np.random.seed(42)
-            np.random.shuffle(indices)
+            if os.path.exists(output_folder): shutil.rmtree(output_folder)
+            ms.to_deepmd_npy(output_folder)
             
-            # 3. 切分
-            n_val = int(n_frames * val_ratio)
-            idx_val = indices[:n_val]
-            idx_train = indices[n_val:]
-            
-            print(f"  -> 总帧数 {n_frames} | 训练集 {len(idx_train)} | 验证集 {len(idx_val)}")
-            
-            # 4. 定义本地路径
-            train_dir_name = "data_train"
-            val_dir_name = "data_val"
-            
-            abs_train_dir = os.path.join(self.work_dir, train_dir_name)
-            abs_val_dir = os.path.join(self.work_dir, val_dir_name)
-            
-            # 清理旧数据
-            if os.path.exists(abs_train_dir): shutil.rmtree(abs_train_dir)
-            if os.path.exists(abs_val_dir): shutil.rmtree(abs_val_dir)
-            
-            # 5. 保存
-            if len(idx_train) > 0:
-                sub_train = system.sub_system(idx_train)
-                sub_train.to("deepmd/npy", abs_train_dir)
-                
-            if len(idx_val) > 0:
-                sub_val = system.sub_system(idx_val)
-                sub_val.to("deepmd/npy", abs_val_dir)
-            
-            # 6. 返回相对路径 (DeepMD 识别 ./data_train)
-            return [f"./{train_dir_name}"], [f"./{val_dir_name}"]
-
         except Exception as e:
-            print(f"❌ DeepMD 数据拆分失败: {e}")
+            print(f"❌ XYZ转DeepMD失败 ({xyz_file}): {e}")
             raise e
+
+    def _get_leaf_systems(self, root_dir):
+        """递归查找包含 type.raw 的目录"""
+        systems = []
+        for root, dirs, files in os.walk(root_dir):
+            if "type.raw" in files:
+                systems.append(os.path.abspath(root))
+        return sorted(systems)
 
     # ========================== GPUMD (NEP) 流程 ==========================
     def prepare_gpumd(self, source_path=None, val_ratio=0.2):
-        print(f"[Trainer] 正在生成 GPUMD (NEP) 配置文件...")
+        print(f"\n[Trainer] >>> 正在生成 GPUMD (NEP) 配置文件 <<<")
         
-        train_paths, val_paths = self._scan_and_split_data(source_path, val_ratio)
-        is_single_source = (len(train_paths) == 1 and train_paths == val_paths)
+        # 1. 定位源数据
+        source_xyz = self._locate_source_xyz(source_path)
 
-        if is_single_source:
-            print(f"[Trainer] 检测到单一合并数据集，正在执行【帧级别】随机拆分...")
-            # 这里的逻辑和 DeepMD 类似，但是保存为 xyz
-            self._split_single_dataset_frames_xyz(train_paths[0], val_ratio)
-        else:
-            print(f"[Trainer] 检测到多个数据集，执行【目录级别】合并...")
-            self._merge_files_physically(train_paths, "train.xyz")
-            self._merge_files_physically(val_paths, "test.xyz")
+        # 2. 物理拆分 XYZ (GPUMD 习惯叫 train.xyz 和 test.xyz)
+        self._split_xyz_file(source_xyz, val_ratio, "train.xyz", "test.xyz")
 
-        # 生成 nep.in
+        # 3. 生成 nep.in
         template = cfg_tr.GPUMD_NEP_TEMPLATE
         type_map = self._get_type_map()
         type_line = f"type          {len(type_map)} {' '.join(type_map)}"
@@ -176,44 +175,7 @@ class ModelTrainer:
             f.write(f"{type_line}  # mandatory\n")
             for key, val in template.items():
                 f.write(f"{key:<13} {val}\n")
-        print(f"  -> nep.in 已生成。")
-        print(f"✅ GPUMD 准备就绪: {self.work_dir}")
-
-    def _split_single_dataset_frames_xyz(self, dataset_path, val_ratio):
-        """GPUMD 专用的拆分逻辑 (保存为 XYZ)"""
-        try:
-            print(f"  -> 正在加载数据: {dataset_path}")
-            system = dpdata.LabeledSystem(dataset_path, fmt="deepmd/npy")
-            n_frames = len(system)
-            
-            indices = np.arange(n_frames)
-            np.random.seed(42)
-            np.random.shuffle(indices)
-            
-            n_val = int(n_frames * val_ratio)
-            idx_val = indices[:n_val]
-            idx_train = indices[n_val:]
-            
-            print(f"  -> 拆分: 训练集 {len(idx_train)} | 测试集 {len(idx_val)}")
-            
-            if len(idx_train) > 0:
-                sub_train = system.sub_system(idx_train)
-                NEPConverter.save_as_xyz(sub_train, os.path.join(self.work_dir, "train.xyz"))
-            
-            if len(idx_val) > 0:
-                sub_test = system.sub_system(idx_val)
-                NEPConverter.save_as_xyz(sub_test, os.path.join(self.work_dir, "test.xyz"))
                 
-        except Exception as e:
-            print(f"❌ 帧拆分失败: {e}")
-            raise e
-
-    def _merge_files_physically(self, dir_list, output_name):
-        out_file = os.path.join(self.work_dir, output_name)
-        print(f"  -> 正在合并生成 {output_name}...")
-        with open(out_file, 'w') as outfile:
-            for d in dir_list:
-                xyz_file = os.path.join(d, "train.xyz")
-                if os.path.exists(xyz_file):
-                    with open(xyz_file, 'r') as infile:
-                        shutil.copyfileobj(infile, outfile)
+        print(f"✅ GPUMD 配置已生成: {nep_path}")
+        print(f"   - 训练集: train.xyz")
+        print(f"   - 测试集: test.xyz")
