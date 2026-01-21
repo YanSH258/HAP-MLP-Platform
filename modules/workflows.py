@@ -13,6 +13,7 @@ from modules.cleaner import DataQualityControl
 from modules.analyzer import SOAPSpaceAnalyzer
 from modules.merger import DatasetMerger
 from modules.converter import NEPConverter
+from modules.trainer import ModelTrainer
 
 # ==============================================================================
 # Stage 1: 生成与提交
@@ -182,3 +183,37 @@ def run_stage_4_merge():
     merger = DatasetMerger()
     merger.merge_all(all_sets, output_dir)
 
+# ==============================================================================
+# Stage 5: 训练输入文件准备
+# ==============================================================================
+def run_stage_5_train(model_type="deepmd", data_path=None, val_ratio=0.2):
+    print(f"\n=== Stage 5: 训练准备 (Model: {model_type.upper()}) ===")
+    print(f"   目标: 生成配置文件与数据集链接")
+    print(f"   数据源: {data_path if data_path else '自动扫描 data/training/set_*'}")
+    print(f"   验证集比例: {val_ratio}")
+
+    timestamp = time.strftime("%Y%m%d_%H%M%S")
+    work_dir = f"train_work_{model_type}_{timestamp}"
+    
+    trainer = ModelTrainer(work_dir)
+    
+    try:
+        if model_type == "deepmd":
+            trainer.prepare_deepmd(source_path=data_path, val_ratio=val_ratio)
+        elif model_type == "gpumd":
+            trainer.prepare_gpumd(source_path=data_path, val_ratio=val_ratio)
+        else:
+            print(f"❌ 未知模型: {model_type}")
+            return
+            
+        print(f"\n✅ 准备工作完成！")
+        print(f"   请进入目录: {work_dir}")
+        if model_type == "deepmd":
+            print("   执行命令: dp train input.json")
+        else:
+            print("   执行命令: nep") 
+            
+    except Exception as e:
+        print(f"❌ 准备失败: {e}")
+        import traceback
+        traceback.print_exc()
