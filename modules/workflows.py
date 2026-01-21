@@ -14,6 +14,8 @@ from modules.analyzer import SOAPSpaceAnalyzer
 from modules.merger import DatasetMerger
 from modules.converter import NEPConverter
 from modules.trainer import ModelTrainer
+from modules.evaluator import ModelEvaluator
+from modules.monitor import TrainingMonitor
 
 # ==============================================================================
 # Stage 1: 生成与提交
@@ -217,3 +219,49 @@ def run_stage_5_train(model_type="deepmd", data_path=None, val_ratio=0.2):
         print(f"❌ 准备失败: {e}")
         import traceback
         traceback.print_exc()
+
+# ==============================================================================
+# Stage 6: 训练监控 (Monitor) 
+# ==============================================================================
+def run_stage_6_monitor(model_type="deepmd", work_dir=None):
+    print(f"\n=== Stage 6: 训练监控 (Model: {model_type.upper()}) ===")
+    
+    if not work_dir:
+        import glob
+        pattern = f"train_work_{model_type}_*"
+        found = sorted(glob.glob(pattern))
+        if not found:
+            print(f"❌ 未找到训练目录。")
+            return
+        work_dir = found[-1]
+        
+    print(f"[Workflow] 监控目标: {work_dir}")
+    monitor = TrainingMonitor(work_dir)
+    
+    if model_type == "deepmd":
+        monitor.plot_deepmd_lcurve()
+    elif model_type == "gpumd":
+        monitor.plot_gpumd_loss()
+
+# ==============================================================================
+# Stage 7: 模型评估 (Evaluate) 
+# ==============================================================================
+def run_stage_7_eval(model_type="deepmd", work_dir=None):
+    print(f"\n=== Stage 7: 模型评估 (Model: {model_type.upper()}) ===")
+    
+    if not work_dir:
+        import glob
+        pattern = f"train_work_{model_type}_*"
+        found = sorted(glob.glob(pattern))
+        if not found:
+            print(f"❌ 未找到训练目录 {pattern}。请通过 --path 指定。")
+            return
+        work_dir = found[-1]
+    
+    print(f"[Workflow] 评估目标: {work_dir}")
+    evaluator = ModelEvaluator(work_dir)
+    
+    if model_type == "deepmd":
+        evaluator.eval_deepmd()
+    elif model_type == "gpumd":
+        evaluator.eval_gpumd()
