@@ -1,8 +1,8 @@
-# HONPAS-MLP-Platform
+# HONPAS-MLP Automation Platform 
 
 本项目是一个基于 Python 构建的自动化工作流系统，旨在连接国产材料模拟软件 **HONPAS** 与机器学习势能（DeepMD-kit / GPUMD）训练框架。
 
-平台实现了从**初始结构微扰采样**、**高通量 DFT 任务调度**、**数据清洗**、**相空间分析**到**模型训练文件构建**的全流程自动化，规范了数据集构建过程。
+平台实现了从**初始结构微扰采样**、**高通量 DFT 任务调度**、**数据清洗**、**相空间分析**、**模型训练**到**精度评估**的全流程自动化，规范了数据集构建过程。
 
 ## 1. 核心功能
 
@@ -11,6 +11,7 @@
 *   **双格式数据流**：数据提取阶段同时生成 DeepMD (`.npy`) 和 GPUMD (`.xyz`) 格式，并自动修正 HONPAS 维里 (Virial) 符号差异。
 *   **质量控制 (QC)**：基于 Z-score 和最大受力阈值自动清洗脏数据。
 *   **训练准备自动化**：支持 DeepMD 和 GPUMD 的训练集/验证集自动划分、物理拆分及配置文件生成。
+*   **模型全生命周期管理**：提供实时的训练 Loss 监控与最终模型的冻结、压缩及精度评估（Parity Plot）。
 
 ## 2. 环境依赖
 
@@ -23,7 +24,7 @@
 # 基础数据处理
 pip install numpy ase dpdata
 
-# 可视化与分析 (Stage 3 需要)
+# 可视化与分析 (Stage 3, 6, 7 需要)
 pip install matplotlib seaborn dscribe scikit-learn
 ```
 
@@ -53,6 +54,8 @@ HAP_project_v2/
 │   ├── merger.py          # 数据集合并
 │   ├── analyzer.py        # SOAP-PCA 可视化分析
 │   ├── trainer.py         # 训练文件生成与数据拆分
+│   ├── monitor.py         # 训练过程 Loss 监控
+│   ├── evaluator.py       # 模型冻结、压缩与精度评估
 │   └── workflows.py       # 阶段流程封装
 ├── templates/             # 输入模板 (.in) 及 赝势库 (psfs/)
 └── data/                  # 数据流转目录
@@ -116,21 +119,43 @@ python main.py --stage 4
 # 指定合并后的数据集，按 8:2 拆分
 python main.py --stage 5 --model_type deepmd --data_path data/training/merged_master_xxx --val_ratio 0.2
 ```
-*   **执行动作**：
-    1.  在当前目录创建 `train_work_deepmd_xxx`。
-    2.  将数据**物理拆分**为 `data_train` 和 `data_val` 子文件夹。
-    3.  生成 `input.json`，使用相对路径指向上述文件夹。
+*   **执行动作**：在当前目录创建 `train_work_deepmd_xxx`，物理拆分数据并生成 `input.json`。
 *   **后续操作**：进入目录执行 `dp train input.json`。
 
 #### 模式 B: 准备 GPUMD (NEP) 训练
 ```bash
 python main.py --stage 5 --model_type gpumd --data_path data/training/merged_master_xxx
 ```
-*   **执行动作**：
-    1.  在当前目录创建 `train_work_gpumd_xxx`。
-    2.  将数据随机拆分并写入 `train.xyz` 和 `test.xyz`。
-    3.  生成 `nep.in` 配置文件。
-*   **后续操作**：进入目录执行 `nep` 。
+*   **执行动作**：在当前目录创建 `train_work_gpumd_xxx`，生成 `train.xyz`, `test.xyz` 和 `nep.in`。
+*   **后续操作**：进入目录执行 `nep`。
+
+### Stage 6: 训练监控 (Monitor)
+在模型训练过程中，实时查看 Loss 收敛曲线。
+
+```bash
+python main.py --stage 6 --model_type deepmd
+# 或
+python main.py --stage 6 --model_type gpumd
+```
+*   程序会自动寻找最新的训练目录。
+*   **输出**：`monitor_lcurve.png` (DeepMD) 或 `monitor_loss.png` (GPUMD)。
+
+### Stage 7: 模型评估 (Evaluate)
+训练完成后，对模型进行冻结、压缩，并评估其精度（RMSE）。
+
+#### DeepMD 评估
+```bash
+python main.py --stage 7 --model_type deepmd
+```
+*   **执行动作**：`dp freeze` -> `dp compress` -> `dp test`。
+*   **输出**：`deepmd_results.png` (能量/受力 Parity Plot)。
+
+#### GPUMD 评估
+```bash
+python main.py --stage 7 --model_type gpumd
+```
+*   **执行动作**：解析 `energy_train.out`, `force_train.out` 等。
+*   **输出**：`eval_report_gpumd.png` (包含 Loss, Energy, Force, Virial 四合一图)。
 
 ---
 
@@ -145,7 +170,6 @@ python main.py --stage 5 --model_type gpumd --data_path data/training/merged_mas
 | `VIS_CONFIG` | SOAP 分析参数 (rcut, nmax, lmax) | `6.0`, `8`, `6` |
 
 ---
-
 
 ### 6. 模块功能详解
 
@@ -163,7 +187,9 @@ python main.py --stage 5 --model_type gpumd --data_path data/training/merged_mas
 | **merger.py** | **数据聚合**：支持将多个分散的数据集（如不同温度/批次）无损合并为统一的主数据集。 |
 | **analyzer.py** | **特征分析**：计算全局 SOAP 描述符并执行 PCA 降维，可视化评估数据集对势能面的覆盖度。 |
 | **trainer.py** | **训练准备**：自动划分训练集/验证集，生成 DeepMD (`input.json`) 或 GPUMD (`nep.in`) 配置文件。 |
-| **workflows.py** | **流程编排**：作为顶层逻辑控制器，串联各独立模块，定义 Stage 1~5 的标准化操作流程。 |
+| **monitor.py** | **训练监控**：实时读取 `lcurve.out` 或 `loss.out`，绘制 Loss 收敛曲线，辅助判断训练状态。 |
+| **evaluator.py** | **模型评估**：执行模型冻结、压缩，调用 `dp test` 或解析 NEP 输出，绘制预测值 vs 真值的 Parity Plot。 |
+| **workflows.py** | **流程编排**：作为顶层逻辑控制器，串联各独立模块，定义 Stage 1~7 的标准化操作流程。 |
 
 ### 7. 注意事项 (Notes)
 
@@ -180,10 +206,10 @@ python main.py --stage 5 --model_type gpumd --data_path data/training/merged_mas
    - **要求**：请确保所有计算任务使用完全一致的 `SPECIES_MAP` 定义。如果原子顺序不匹配，合并将失败或导致势函数物理意义错误。
 
 4. **可视化依赖**：
-   - Stage 3 的 UMAP 分析依赖 `umap-learn` 库。若运行报错，请检查是否已执行 `pip install umap-learn`。
-   - 对于样本量超过 2000 帧的数据集，降维计算可能需要 1-3 分钟。
+   - Stage 3 的 PCA 分析依赖 `scikit-learn` 和 `dscribe` 库。对于样本量超过 2000 帧的数据集，降维计算可能需要 1-3 分钟。
 
 5. **物理预筛选拦截**：
    - 若生成的任务数少于 `NUM_TASKS` 设置值，通常是因为 `validator` 拦截了过多原子重叠构型。请尝试减小微扰幅度或微调 `QC_OVERLAP_THRESHOLD`。
-6.   **维里符号修正**：
+
+6. **维里符号修正**：
    - HONPAS 输出的 Virial 与 GPUMD 定义符号相反。本平台在导出 `train.xyz` 时已自动乘以 `-1.0` 进行修正，DeepMD 格式保持原样。
