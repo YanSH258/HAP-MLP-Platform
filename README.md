@@ -11,7 +11,7 @@
 *   **双格式数据流**：数据提取阶段同时生成 DeepMD (`.npy`) 和 GPUMD (`.xyz`) 格式，并自动修正 HONPAS 维里 (Virial) 符号差异。
 *   **质量控制 (QC)**：基于 Z-score 和最大受力阈值自动清洗脏数据。
 *   **训练准备自动化**：支持 DeepMD 和 GPUMD 的训练集/验证集自动划分、物理拆分及配置文件生成。
-*   **模型全生命周期管理**：提供实时的训练 Loss 监控与最终模型的冻结、压缩及精度评估（Parity Plot）。
+*   **模型全生命周期管理**：提供实时的训练 Loss 监控与最终模型的冻结、压缩及精度评估（Parity Plot）以及gpumd主动学习策略。
 
 ## 2. 环境依赖
 
@@ -44,6 +44,7 @@ pip install matplotlib seaborn dscribe scikit-learn
 HAP_project_v2/
 ├── config.py              # 全局配置 (微扰参数、QC阈值、HONPAS模板路径)
 ├── config_train.py        # 训练配置 (DeepMD/GPUMD 超参数模板)
+├── config_active.py       # 主动学习配置 (MD探索参数)
 ├── main.py                # 主程序入口 (CLI)
 ├── modules/               # 核心功能库
 │   ├── workflows.py       # [总控] 阶段流程封装
@@ -60,10 +61,14 @@ HAP_project_v2/
 │   ├── analysis/          # [分析端]
 │   │   ├── analyzer.py    # SOAP-PCA 核心分析
 │   │   └── visualizer.py  # 基础绘图工具
-│   └── training/          # [训练端]
-│       ├── trainer.py     # 训练准备与配置生成
-│       ├── monitor.py     # 训练监控
-│       └── evaluator.py   # 模型评估
+│   ├── training/          # [训练端]
+│   │   ├── trainer.py     # 训练准备与配置生成
+│   │   ├── monitor.py     # 训练监控
+│   │   └── evaluator.py   # 模型评估
+│   └── active_learning/   # 主动学习迭代模块 (Ensemble & Explore)
+│       ├── trainer.py     # 构建多模型系综训练环境。
+│       ├── explorer.py    # 自动化配置带主动学习判据的 MD 任务
+│       └── selector.py    # 从 active.xyz 中筛选用于标注的代表性结构
 ├── templates/             # 输入模板 (.in) 及 赝势库 (psfs/)
 └── data/                  # 数据流转目录
     ├── perturbed/         # 微扰结构备份
@@ -138,6 +143,30 @@ python main.py --stage 6 --model_type deepmd
 # DeepMD 评估 (自动调用 dp test 并绘图)
 python main.py --stage 7 --model_type deepmd
 ```
+
+### Stage 8: GPUMD 主动学习迭代
+通过多模型系综 在线评估不确定度，自动捕捉势能面缺失区域。
+
+#### 8.1 准备系综训练
+生成 $N$ 个（默认 4 个）独立的 NEP 训练目录。
+```bash
+python main.py --stage 8 --sub 1 --data_path data/training/merged_master_xxx
+```
+*   **输出**：`al_gpumd_train_时间戳/`。手动在各子目录运行 `nep` 得到 4 个 `nep.txt`。
+
+#### 8.2 准备 MD 探索
+链接已训练模型，生成带有 `active` 关键字的 GPUMD `run.in`。
+```bash
+# --path 指向上步生成的训练根目录，--data_path 指向 MD 初始结构
+python main.py --stage 8 --sub 2 --path al_gpumd_train_xxx --data_path data/raw/model.xyz
+```
+*   **特性**：自动适配 `npt_mttk` 或 `nvt_ber` 语法，支持自定义 `dump_xyz` 属性。
+
+#### 8.3 候选结构提取
+解析探索产生的 `active.xyz`，筛选高偏差构型送往 HONPAS 进行标注。
+
+---
+
 
 ---
 
